@@ -229,6 +229,22 @@
 }
 
 @media (max-width: 640px) {
+  .media-area {
+    padding: 12px;
+  }
+
+  .preview-img-large {
+    max-height: 180px;
+  }
+
+  .empty-preview {
+    padding: 20px;
+  }
+
+  .empty-icon {
+    font-size: 32px;
+  }
+
   .button-group {
     flex-direction: column;
   }
