@@ -58,18 +58,23 @@ const Frontend = ({
           // Extract DateTime
           const dateTime = extractDateTimeFromExif(exif);
 
-          console.log("✅ EXIF extracted:", { gpsLocation, dateTime });
-
-          // Gọi callback để lưu EXIF data vào App.jsx
-          onExifExtracted({
-            gpsLocation,
-            dateTime,
-            allExif: exif,
-          });
+          if (gpsLocation || dateTime) {
+            console.log("✅ EXIF extracted:", { gpsLocation, dateTime });
+            onExifExtracted({
+              gpsLocation,
+              dateTime,
+              allExif: exif,
+            });
+          } else {
+            // Ảnh không có GPS hoặc DateTime
+            console.warn("⚠️ Ảnh không có EXIF metadata (GPS/DateTime)");
+            onExifExtracted(null);
+            alert("⚠️ Ảnh của bạn không chứa thông tin vị trí/thời gian (EXIF metadata).\n\nVui lòng nhập vị trí và thời gian thủ công phía dưới.");
+          }
         } catch (error) {
           console.error("❌ Error reading EXIF:", error);
-          // Nếu không đọc được EXIF, vẫn tiếp tục xử lý ảnh
           onExifExtracted(null);
+          alert("⚠️ Không thể đọc metadata ảnh.\n\nVui lòng nhập vị trí và thời gian thủ công.");
         }
       };
       exifReader.readAsBinaryString(file);
