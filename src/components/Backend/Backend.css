@@ -1,0 +1,246 @@
+/* Nội dung textarea */
+.content-textarea {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  background: #fefefe;
+  border-radius: 20px;
+  padding: 14px 18px;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  transition: all 0.2s;
+  line-height: 1.5;
+}
+
+.content-textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.char-counter {
+  text-align: right;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 6px;
+}
+
+/* Nút submit */
+.submit-area {
+  margin-top: 32px;
+  display: flex;
+  gap: 12px;
+}
+
+.submit-btn {
+  flex: 2;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  padding: 14px;
+  border-radius: 60px;
+  font-weight: 600;
+  font-size: 16px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.submit-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px -5px rgba(102, 126, 234, 0.4);
+}
+
+.reset-btn {
+  flex: 1;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 14px;
+  border-radius: 60px;
+  font-weight: 500;
+  font-size: 14px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.reset-btn:hover {
+  background: #e2e8f0;
+}
+
+@media (max-width: 640px) {
+  .submit-area {
+    flex-direction: column;
+  }
+}
+
+/* Confidence Result */
+.confidence-box {
+  background: #f9fafb;
+  border-radius: 16px;
+  padding: 16px;
+  border-left: 5px solid #667eea;
+}
+
+.confidence-box.confidence-excellent {
+  background: #f0fdf4;
+  border-left-color: #10b981;
+}
+
+.confidence-box.confidence-good {
+  background: #f0fdf4;
+  border-left-color: #10b981;
+}
+
+.confidence-box.confidence-ok {
+  background: #fffbeb;
+  border-left-color: #f59e0b;
+}
+
+.confidence-box.confidence-low {
+  background: #fef2f2;
+  border-left-color: #f97316;
+}
+
+.confidence-box.confidence-critical {
+  background: #fef2f2;
+  border-left-color: #ef4444;
+}
+
+.confidence-main {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 16px;
+}
+
+.confidence-value {
+  font-size: 32px;
+  font-weight: 700;
+  min-width: 80px;
+  color: #0f172a;
+}
+
+.confidence-message {
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.confidence-breakdown {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12px;
+}
+
+.confidence-breakdown h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 10px;
+  margin-top: 0;
+}
+
+.breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.breakdown-row span:first-child {
+  min-width: 60px;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.breakdown-row .score {
+  min-width: 35px;
+  text-align: right;
+  font-weight: 600;
+  color: #4f46e5;
+}
+
+/* Keyword Details */
+.keyword-details {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  font-size: 12px;
+}
+
+.keyword-section {
+  margin-bottom: 10px;
+}
+
+.keyword-section:last-child {
+  margin-bottom: 0;
+}
+
+.keyword-label {
+  display: inline-block;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 6px;
+}
+
+.keyword-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.keyword-tag {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.keyword-tag.strong-tag {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.keyword-tag.normal-tag {
+  background: #fef3c7;
+  color: #a16207;
+  border: 1px solid #fcd34d;
+}
+
+.keyword-none {
+  display: inline-block;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.keyword-summary {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+  font-weight: 600;
+  color: #1e293b;
+  text-align: center;
+}
