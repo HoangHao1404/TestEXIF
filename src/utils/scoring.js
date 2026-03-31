@@ -44,44 +44,45 @@ export const NORMAL_KEYWORDS = [
 /**
  * Tính điểm vị trí dựa trên khoảng cách GPS
  * - 0 km: 100 điểm
- * - 500 km: 0 điểm
+ * - 1 km: 0 điểm
  * - Linear interpolation
+ * 
+ * Hỗ trợ 2 format reportLocation:
+ * 1. Tọa độ: "lat,lon" (e.g., "10.776234,106.710049")
+ * 2. Địa chỉ text (sẽ tự động geocode)
+ * 
  * @param {object} exifLocation - {latitude, longitude}
- * @param {string} reportLocation - địa chỉ báo cáo
+ * @param {object} reportCoords - {latitude, longitude} (giá trị đã được geocode)
  * @returns {number} score 0-100, hoặc null nếu không có GPS
  */
-export function calculateLocationScore(exifLocation, reportLocation) {
+export function calculateLocationScore(exifLocation, reportCoords) {
   if (!exifLocation || !exifLocation.latitude || !exifLocation.longitude) {
     return null; // Không có EXIF location
   }
 
-  // Giả sử reportLocation có format "lat,lon" hoặc là string địa chỉ
-  // Nếu là string địa chỉ (không có tọa độ), ta không thể so sánh -> return penalty
-  const parts = reportLocation.trim().split(",");
-  if (parts.length !== 2) {
-    // Không phải tọa độ GPS, có thể là địa chỉ string
-    // Trong trường hợp này, ta không tính điểm vị trí
-    return 0;
-  }
-
-  const reportLat = parseFloat(parts[0].trim());
-  const reportLon = parseFloat(parts[1].trim());
-
-  if (isNaN(reportLat) || isNaN(reportLon)) {
-    return 0;
+  // Nếu không có tọa độ báo cáo, không thể so sánh
+  if (!reportCoords || !reportCoords.latitude || !reportCoords.longitude) {
+    return null;
   }
 
   // Tính khoảng cách Haversine (km)
   const distance = haversineDistance(
     exifLocation.latitude,
     exifLocation.longitude,
-    reportLat,
-    reportLon,
+    reportCoords.latitude,
+    reportCoords.longitude,
   );
 
-  // Scoring: 0km = 100, 1km = 0, linear (Phương án 2: stricter)
-  const maxDistance = 1; // km
+  // Scoring: 0km = 100, 5km = 0, linear
+  const maxDistance = 5; // km
   const score = Math.max(0, 100 - (distance / maxDistance) * 100);
+
+  console.log("📍 Location comparison:", {
+    exifLocation,
+    reportCoords,
+    distanceKm: distance.toFixed(3),
+    score: Math.round(score),
+  });
 
   return Math.round(score);
 }
@@ -147,6 +148,7 @@ export function calculateContentScore(reportContent) {
 
 /**
  * Chi tiết tính điểm nội dung - bao gồm từ khóa và điểm
+ * Sửa: Dùng includes thay vì regex word boundary vì nó work chắc chắn hơn
  * @param {string} reportContent - nội dung báo cáo
  * @returns {object} { score, totalPoints, strongMatches: [...], normalMatches: [...] }
  */
@@ -165,16 +167,23 @@ export function calculateContentScoreDetailed(reportContent) {
   const strongMatches = [];
   const normalMatches = [];
 
-  // Check strong keywords (2 pts)
+  // Check strong keywords (2 pts) - Dùng includes để match chính xác
   STRONG_KEYWORDS.forEach((keyword) => {
-    const regex = new RegExp(`\\b${keyword.toLowerCase()}\\b`, "g");
-    const matches = contentLower.match(regex);
-    if (matches) {
-      const points = matches.length * 2;
+    const keywordLower = keyword.toLowerCase();
+    if (contentLower.includes(keywordLower)) {
+      // Đếm số lần xuất hiện
+      let count = 0;
+      let lastIndex = 0;
+      while ((lastIndex = contentLower.indexOf(keywordLower, lastIndex)) !== -1) {
+        count++;
+        lastIndex += keywordLower.length;
+      }
+
+      const points = count * 2;
       totalPoints += points;
       strongMatches.push({
         keyword,
-        count: matches.length,
+        count,
         points,
       });
     }
@@ -182,14 +191,20 @@ export function calculateContentScoreDetailed(reportContent) {
 
   // Check normal keywords (1 pt)
   NORMAL_KEYWORDS.forEach((keyword) => {
-    const regex = new RegExp(`\\b${keyword.toLowerCase()}\\b`, "g");
-    const matches = contentLower.match(regex);
-    if (matches) {
-      const points = matches.length * 1;
+    const keywordLower = keyword.toLowerCase();
+    if (contentLower.includes(keywordLower)) {
+      let count = 0;
+      let lastIndex = 0;
+      while ((lastIndex = contentLower.indexOf(keywordLower, lastIndex)) !== -1) {
+        count++;
+        lastIndex += keywordLower.length;
+      }
+
+      const points = count * 1;
       totalPoints += points;
       normalMatches.push({
         keyword,
-        count: matches.length,
+        count,
         points,
       });
     }
@@ -236,18 +251,20 @@ export function calculateTimeScore(exifTime, reportTime) {
 }
 
 /**
- * Tính tổng confidence dựa trên 3 điểm
+ * Tính tổng confidence dựa trên 4 điểm
  * @param {number} locationScore - 0-100 hoặc null
  * @param {number} contentScore - 0-100
  * @param {number} timeScore - 0-100 hoặc null
+ * @param {number} yoloScore - 0-100 hoặc null (từ YOLO AI detection)
  * @returns {object} { confidence: 0-100, breakdown: {...}, weights: {...} }
  */
-export function calculateConfidence(locationScore, contentScore, timeScore) {
+export function calculateConfidence(locationScore, contentScore, timeScore, yoloScore = null) {
   // Xác định trọng số (weights)
-  // Nếu đầy đủ 3 tiêu chí: location 30%, content 40%, time 30%
-  // Nếu thiếu location: content 50%, time 50%
-  // Nếu thiếu time: location 40%, content 60%
-  // Nếu thiếu cả: content 100%
+  // Nếu đầy đủ 4 tiêu chí: location 28%, content 28%, time 23%, yolo 21%
+  // Không có YOLO: location 35%, content 35%, time 30%
+  // Nếu thiếu location: content 40%, time 35%, yolo 25%
+  // Nếu thiếu time: location 40%, content 40%, yolo 20%
+  // Nếu chỉ có content: content 100%
 
   let weights = {};
   let scores = {};
@@ -265,27 +282,59 @@ export function calculateConfidence(locationScore, contentScore, timeScore) {
     validCount++;
     scores.time = timeScore;
   }
+  if (yoloScore !== null && yoloScore !== undefined) {
+    validCount++;
+    scores.yolo = yoloScore;
+  }
 
-  // Tính trọng số dựa trên số tiêu chí hợp lệ (Phương án 2: 35/35/30)
-  if (validCount === 3) {
-    weights = { location: 0.35, content: 0.35, time: 0.3 };
-  } else if (validCount === 2) {
+  // Tính trọng số dựa trên số tiêu chí hợp lệ
+  const hasYolo = yoloScore !== null && yoloScore !== undefined;
+
+  if (hasYolo && validCount === 4) {
+    // Đã đủ 4 tiêu chí
+    weights = { location: 0.28, content: 0.28, time: 0.23, yolo: 0.21 };
+  } else if (hasYolo && validCount === 3) {
+    // Có YOLO + 2 tiêu chí khác
     if (locationScore === null) {
-      weights = { content: 0.55, time: 0.45 };
+      weights = { content: 0.4, time: 0.35, yolo: 0.25 };
     } else if (timeScore === null) {
-      weights = { location: 0.45, content: 0.55 };
+      weights = { location: 0.4, content: 0.4, yolo: 0.2 };
     } else {
-      weights = { location: 0.45, content: 0.55 };
+      weights = { location: 0.35, content: 0.35, yolo: 0.3 };
     }
-  } else if (validCount === 1) {
+  } else if (hasYolo && validCount === 2) {
+    // Chỉ có YOLO + 1 tiêu chí khác
     if (contentScore !== null) {
-      weights = { content: 1.0 };
+      weights = { content: 0.6, yolo: 0.4 };
     } else if (locationScore !== null) {
-      weights = { location: 1.0 };
+      weights = { location: 0.5, yolo: 0.5 };
     } else {
-      weights = { time: 1.0 };
+      weights = { time: 0.5, yolo: 0.5 };
     }
-  } else {
+  } else if (!hasYolo) {
+    // Không có YOLO, dùng weighting cũ cho 3 tiêu chí
+    if (validCount === 3) {
+      weights = { location: 0.35, content: 0.35, time: 0.3 };
+    } else if (validCount === 2) {
+      if (locationScore === null) {
+        weights = { content: 0.55, time: 0.45 };
+      } else if (timeScore === null) {
+        weights = { location: 0.45, content: 0.55 };
+      } else {
+        weights = { location: 0.45, content: 0.55 };
+      }
+    } else if (validCount === 1) {
+      if (contentScore !== null) {
+        weights = { content: 1.0 };
+      } else if (locationScore !== null) {
+        weights = { location: 1.0 };
+      } else {
+        weights = { time: 1.0 };
+      }
+    }
+  }
+
+  if (Object.keys(weights).length === 0) {
     // Không có tiêu chí nào -> confidence 0
     return {
       confidence: 0,
@@ -315,11 +364,15 @@ export function calculateConfidence(locationScore, contentScore, timeScore) {
  * Đánh giá mức độ tin cậy
  */
 function getConfidenceMessage(confidence) {
-  if (confidence >= 90) return "🟢 Rất tin cậy";
-  if (confidence >= 80) return "🟢 Tin cậy cao";
-  if (confidence >= 70) return "🟡 Tin cậy trung bình";
-  if (confidence >= 50) return "🟡 Tin cậy thấp";
-  return "🔴 Không đủ tin cậy";
+  if (confidence >= 90)
+    return "🟢 Rất tin cậy - Thông tin chi tiết và chính xác";
+  if (confidence >= 70)
+    return "🟢 Tin cậy cao - Đủ thông tin để xử lý";
+  if (confidence >= 50)
+    return "🟡 Tin cậy trung bình - Cần bổ sung thông tin";
+  if (confidence >= 30)
+    return "🟡 Tin cậy thấp - Thiếu thông tin quan trọng";
+  return "🔴 Không đủ tin cậy - Vui lòng cung cấp thêm chi tiết";
 }
 
 /**
@@ -329,7 +382,10 @@ function getConfidenceMessage(confidence) {
  */
 export function extractGPSFromExif(exif) {
   try {
-    if (!exif || !exif["GPS"]) return null;
+    if (!exif || !exif["GPS"]) {
+      console.log("No GPS data in EXIF");
+      return null;
+    }
 
     const gps = exif["GPS"];
     const lat = gps[2]; // GPSLatitude
@@ -337,16 +393,36 @@ export function extractGPSFromExif(exif) {
     const latRef = gps[1]; // GPSLatitudeRef
     const lonRef = gps[3]; // GPSLongitudeRef
 
-    if (!lat || !lon) return null;
+    // Validate all required fields exist and have proper structure
+    if (!lat || !lon) {
+      console.log("Invalid GPS data structure:", { lat, lon, latRef, lonRef });
+      return null;
+    }
 
-    // Convert từ [degrees, minutes, seconds] thành decimal
-    const latDecimal = lat[0] + lat[1] / 60 + lat[2] / 3600;
-    const lonDecimal = lon[0] + lon[1] / 60 + lon[2] / 3600;
+    // Convert Rational format [numerator, denominator] or [degrees, minutes, seconds]
+    let latDecimal, lonDecimal;
+    
+    if (Array.isArray(lat) && lat.length >= 3) {
+      // Format: [degrees, minutes, seconds] - each as Rational or number
+      const latD = typeof lat[0] === 'object' ? lat[0][0] / lat[0][1] : lat[0];
+      const latM = typeof lat[1] === 'object' ? lat[1][0] / lat[1][1] : lat[1];
+      const latS = typeof lat[2] === 'object' ? lat[2][0] / lat[2][1] : lat[2];
+      latDecimal = latD + latM / 60 + latS / 3600;
+      
+      const lonD = typeof lon[0] === 'object' ? lon[0][0] / lon[0][1] : lon[0];
+      const lonM = typeof lon[1] === 'object' ? lon[1][0] / lon[1][1] : lon[1];
+      const lonS = typeof lon[2] === 'object' ? lon[2][0] / lon[2][1] : lon[2];
+      lonDecimal = lonD + lonM / 60 + lonS / 3600;
+    } else {
+      console.log("Unknown GPS format:", { lat, lon });
+      return null;
+    }
 
     // Áp dụng hướng (S, W là âm)
     const latitude = latRef === "S" ? -latDecimal : latDecimal;
     const longitude = lonRef === "W" ? -lonDecimal : lonDecimal;
 
+    console.log("✅ GPS extracted:", { latitude, longitude, latRef, lonRef });
     return { latitude, longitude };
   } catch (error) {
     console.error("Error extracting GPS from EXIF:", error);
@@ -361,22 +437,169 @@ export function extractGPSFromExif(exif) {
  */
 export function extractDateTimeFromExif(exif) {
   try {
-    if (!exif || !exif["0th"]) return null;
+    if (!exif) {
+      console.log("⚠️ Không có EXIF data");
+      return null;
+    }
 
+    // piexif lưu EXIF trong exif["0th"] (IFD0)
     const exif0th = exif["0th"];
-    const dateTimeTag = 306; // DateTime tag
+    if (!exif0th) {
+      console.log("⚠️ Không có exif['0th']");
+      return null;
+    }
 
-    if (!exif0th[dateTimeTag]) return null;
+    const dateTimeTag = 306; // DateTime tag in EXIF
 
-    const dateTimeStr = exif0th[dateTimeTag]; // Format: "2023:12:15 10:30:45"
-    // Convert to Date object
-    const dateObj = new Date(dateTimeStr.replace(/:/g, "-"));
+    if (!exif0th[dateTimeTag]) {
+      console.log("⚠️ Không có DateTime tag (306) trong EXIF");
+      console.log("🔍 Available tags:", Object.keys(exif0th).slice(0, 10));
+      return null;
+    }
 
-    if (isNaN(dateObj.getTime())) return null;
+    let dateTimeStr = exif0th[dateTimeTag];
 
+    // piexif trả về bytes, cần decode thành string
+    if (typeof dateTimeStr === "object" && dateTimeStr.length !== undefined) {
+      dateTimeStr = String.fromCharCode.apply(null, dateTimeStr);
+    }
+
+    // Nếu vẫn là bytes array, convert to string
+    if (Array.isArray(dateTimeStr)) {
+      dateTimeStr = String.fromCharCode.apply(null, dateTimeStr);
+    }
+
+    dateTimeStr = dateTimeStr.trim();
+    console.log("🕐 DateTime string from EXIF:", dateTimeStr);
+
+    if (!dateTimeStr || dateTimeStr.length === 0) {
+      console.log("⚠️ DateTime string trống");
+      return null;
+    }
+
+    // Format từ EXIF: "2023:12:15 10:30:45" -> "2023-12-15T10:30:45"
+    const parts = dateTimeStr.split(" ");
+    if (parts.length < 2) {
+      console.log("⚠️ DateTime format không hợp lệ:", dateTimeStr);
+      return null;
+    }
+
+    const datePart = parts[0].replace(/:/g, "-");
+    const timePart = parts[1];
+    const formattedStr = `${datePart}T${timePart}`;
+
+    console.log("📅 Formatted DateTime:", formattedStr);
+    const dateObj = new Date(formattedStr);
+
+    if (isNaN(dateObj.getTime())) {
+      console.log("⚠️ Không thể convert thành Date:", formattedStr);
+      return null;
+    }
+
+    console.log("✅ DateTime extracted successfully:", dateObj);
     return dateObj;
   } catch (error) {
-    console.error("Error extracting DateTime from EXIF:", error);
+    console.error("❌ Error extracting DateTime from EXIF:", error);
     return null;
   }
+}
+
+/**
+ * Kiểm tra xem location có phải tọa độ GPS hay không
+ * Format: "lat,lon" hoặc "lat, lon"
+ * @param {string} location - location string
+ * @returns {boolean} true nếu là tọa độ, false nếu là địa chỉ text
+ */
+export function isCoordinateLocation(location) {
+  if (!location || typeof location !== "string") return false;
+  const parts = location.trim().split(",");
+  if (parts.length !== 2) return false;
+  const lat = parseFloat(parts[0].trim());
+  const lon = parseFloat(parts[1].trim());
+  return (
+    !isNaN(lat) &&
+    !isNaN(lon) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lon) <= 180
+  );
+}
+
+/**
+ * Chuyển đổi địa chỉ text thành tọa độ GPS
+ * Sử dụng OpenStreetMap Nominatim API (miễn phí, không cần API key)
+ * @param {string} address - địa chỉ (e.g., "Đại học Duy Tân, Đà Nẵng, Việt Nam")
+ * @returns {Promise<{latitude, longitude} | null>} tọa độ hoặc null nếu không tìm thấy
+ */
+export async function geocodeAddress(address) {
+  if (!address || address.trim().length === 0) {
+    console.warn("⚠️ Địa chỉ không hợp lệ");
+    return null;
+  }
+
+  try {
+    console.log("🌐 Geocoding address:", address);
+    
+    // Use Nominatim API (no API key required)
+    const encodedAddress = encodeURIComponent(address);
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodedAddress}&format=json&limit=1`;
+
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Pothole-Reporter-App", // Nominatim requires User-Agent
+      },
+    });
+
+    if (!response.ok) {
+      console.error("❌ Geocoding API error:", response.status);
+      return null;
+    }
+
+    const data = await response.json();
+
+    if (!data || data.length === 0) {
+      console.warn("⚠️ Địa chỉ không tìm thấy:", address);
+      return null;
+    }
+
+    const result = data[0];
+    const latitude = parseFloat(result.lat);
+    const longitude = parseFloat(result.lon);
+
+    console.log("✅ Geocoding successful:", {
+      address,
+      latitude,
+      longitude,
+      displayName: result.display_name,
+    });
+
+    return { latitude, longitude };
+  } catch (error) {
+    console.error("❌ Geocoding error:", error);
+    return null;
+  }
+}
+
+/**
+ * Xử lý location báo cáo - có thể là tọa độ hoặc địa chỉ text
+ * Nếu là địa chỉ, convert sang tọa độ
+ * @param {string} reportLocation - tọa độ hoặc địa chỉ
+ * @returns {Promise<{latitude, longitude} | null>} tọa độ GPS hoặc null
+ */
+export async function parseReportLocation(reportLocation) {
+  if (!reportLocation || typeof reportLocation !== "string") {
+    return null;
+  }
+
+  // Kiểm tra xem có phải tọa độ rồi không
+  if (isCoordinateLocation(reportLocation)) {
+    const parts = reportLocation.trim().split(",");
+    const lat = parseFloat(parts[0].trim());
+    const lon = parseFloat(parts[1].trim());
+    console.log("📍 Location là tọa độ:", { lat, lon });
+    return { latitude: lat, longitude: lon };
+  }
+
+  // Nếu là địa chỉ text, geocode
+  console.log("🏘️ Location là địa chỉ text, geocoding...");
+  return await geocodeAddress(reportLocation);
 }

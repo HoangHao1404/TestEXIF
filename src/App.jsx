@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import "./App.css";
 import Frontend from "./components/Frontend/Frontend";
 import Backend from "./components/Backend/Backend";
@@ -8,7 +8,10 @@ import {
   calculateContentScoreDetailed,
   calculateTimeScore,
   calculateConfidence,
+  parseReportLocation,
+  isCoordinateLocation,
 } from "./utils/scoring";
+import { calculateYoloScore } from "./utils/yoloValidator";
 
 const App = () => {
   const [imagePreview, setImagePreview] = useState(null);
@@ -17,12 +20,11 @@ const App = () => {
   const [content, setContent] = useState("");
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [locationStatus, setLocationStatus] = useState("");
-  const [exifData, setExifData] = useState(null); // Thêm EXIF data state
-  const [confidenceResult, setConfidenceResult] = useState(null); // Tính toán confidence
-  const [contentScoreDetailed, setContentScoreDetailed] = useState(null); // Chi tiết keyword matching
-
-  const fileInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
+  const [exifData, setExifData] = useState(null); // EXIF data state
+  const [confidenceResult, setConfidenceResult] = useState(null); // Confidence score result
+  const [contentScoreDetailed, setContentScoreDetailed] = useState(null); // Keyword matching details
+  const [yoloResult, setYoloResult] = useState(null); // YOLO AI validation result
+  const [yoloValidating, setYoloValidating] = useState(false); // YOLO validation in progress
 
   // Xử lý khi chọn file từ máy tính
   const handleFileSelect = (e) => {
@@ -39,83 +41,134 @@ const App = () => {
     }
   };
 
-  // Xử lý chụp ảnh từ camera
-  const handleCameraCapture = () => {
-    if (cameraInputRef.current) {
-      cameraInputRef.current.click();
-    }
-  };
+
 
   // Xóa ảnh đã chọn
   const handleRemoveImage = () => {
     setImagePreview(null);
     setImageFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    if (cameraInputRef.current) cameraInputRef.current.value = "";
   };
 
   // Lấy vị trí hiện tại
   const getCurrentLocation = () => {
     if (!navigator.geolocation) {
-      setLocationStatus("Trình duyệt không hỗ trợ định vị");
+      setLocationStatus("❌ Trình duyệt không hỗ trợ định vị");
+      setIsGettingLocation(false);
       return;
     }
 
     setIsGettingLocation(true);
-    setLocationStatus("Đang lấy vị trí...");
+    setLocationStatus("📍 Đang yêu cầu quyền truy cập vị trí...");
+
+    // Kiểm tra trạng thái quyền trước (nếu browser hỗ trợ)
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions
+        .query({ name: "geolocation" })
+        .then((permissionStatus) => {
+          if (permissionStatus.state === "denied") {
+            setLocationStatus(
+              "🔒 Quyền vị trí đã bị từ chối. Vui lòng vào cài đặt để bật lại."
+            );
+            setIsGettingLocation(false);
+            setTimeout(() => setLocationStatus(""), 5000);
+            return;
+          }
+        })
+        .catch(() => {
+          // Permissions API không được hỗ trợ, vẫn tiếp tục
+        });
+    }
+
+    const options = {
+      enableHighAccuracy: false,
+      timeout: 10000,
+      maximumAge: 60000, // Cache vị trí trong 1 phút
+    };
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const { latitude, longitude } = position.coords;
-        // Gọi reverse geocoding để lấy tên địa điểm (sử dụng Nominatim OpenStreetMap)
+        const { latitude, longitude, accuracy } = position.coords;
+        console.log("📍 Vị trí lấy thành công:", {
+          latitude,
+          longitude,
+          accuracy,
+        });
+
+        setLocationStatus(
+          `✅ Đã lấy tọa độ (độ chính xác: ~${Math.round(accuracy)}m). Đang lấy địa chỉ...`
+        );
+
+        // Gọi reverse geocoding với timeout riêng
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
         fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1&accept-language=vi`,
+          {
+            signal: controller.signal,
+            headers: { "User-Agent": "TestEXIF/1.0" },
+          }
         )
-          .then((res) => res.json())
+          .then((res) => {
+            clearTimeout(timeoutId);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
           .then((data) => {
-            const address = data.display_name || `${latitude}, ${longitude}`;
-            setLocation(address);
-            setLocationStatus("✓ Đã lấy vị trí");
-            setTimeout(() => setLocationStatus(""), 2000);
+            let address = data.display_name;
+            // Rút gọn địa chỉ nếu quá dài
+            if (address && address.length > 100) {
+              const parts = address.split(",");
+              address = parts.slice(0, 3).join(",").trim();
+            }
+            setLocation(
+              address ||
+                `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+            );
+            setLocationStatus("✅ Đã lấy vị trí thành công!");
+            setIsGettingLocation(false);
+            setTimeout(() => setLocationStatus(""), 3000);
           })
-          .catch(() => {
-            // Fallback: hiển thị tọa độ nếu không lấy được địa chỉ
-            setLocation(`${latitude}, ${longitude}`);
-            setLocationStatus("✓ Đã lấy tọa độ");
-            setTimeout(() => setLocationStatus(""), 2000);
-          })
-          .finally(() => setIsGettingLocation(false));
+          .catch((error) => {
+            clearTimeout(timeoutId);
+            console.warn("Reverse geocoding error:", error);
+            // Fallback: dùng tọa độ
+            setLocation(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+            setLocationStatus(
+              "⚠️ Đã lấy tọa độ (không lấy được địa chỉ chi tiết)"
+            );
+            setIsGettingLocation(false);
+            setTimeout(() => setLocationStatus(""), 3000);
+          });
       },
       (error) => {
-        console.error("Lỗi định vị:", error);
+        console.error("Geolocation error:", error);
         let errorMsg = "";
         switch (error.code) {
           case error.PERMISSION_DENIED:
-            errorMsg = "Bạn đã từ chối quyền truy cập vị trí";
+            errorMsg =
+              "🔒 Bạn đã từ chối quyền vị trí. Vui lòng bật trong cài đặt trình duyệt.";
             break;
           case error.POSITION_UNAVAILABLE:
-            errorMsg = "Không thể xác định vị trí";
+            errorMsg =
+              "📡 Không thể xác định vị trí GPS. Vui lòng bật GPS/WiFi.";
             break;
           case error.TIMEOUT:
-            errorMsg = "Quá thời gian chờ lấy vị trí";
+            errorMsg = "⏰ Quá thời gian chờ. Vui lòng thử lại.";
             break;
           default:
-            errorMsg = "Không thể lấy vị trí";
+            errorMsg = `❌ Lỗi: ${error.message}`;
         }
         setLocationStatus(errorMsg);
         setIsGettingLocation(false);
-        setTimeout(() => setLocationStatus(""), 3000);
+        setTimeout(() => setLocationStatus(""), 5000);
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
-      },
+      options
     );
   };
 
-  // Xử lý submit form
-  const handleSubmit = (e) => {
+  // Xử lý submit form (async để hỗ trợ geocoding)
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     // Kiểm tra dữ liệu
@@ -137,23 +190,55 @@ const App = () => {
     let contentScore = null;
     let timeScore = null;
 
-    // Tính location score (nếu có EXIF GPS)
+    // Xử lý location: convert từ địa chỉ text sang tọa độ nếu cần
+    let reportCoords = null;
     if (exifData && exifData.gpsLocation) {
-      locationScore = calculateLocationScore(exifData.gpsLocation, location);
+      console.log("🔄 Xử lý location báo cáo...");
+      reportCoords = await parseReportLocation(location);
+      
+      if (reportCoords) {
+        locationScore = calculateLocationScore(exifData.gpsLocation, reportCoords);
+        console.log("📍 Location score calculated:", locationScore);
+      } else {
+        console.log(
+          "⚠️ Không thể xác định tọa độ báo cáo. Skipping location scoring."
+        );
+      }
+    } else {
+      console.log("⚠️ Không có GPS từ EXIF. Skipping location scoring.");
     }
 
     // Tính content score chi tiết (luôn có vì có content)
     const contentScoreDetail = calculateContentScoreDetailed(content);
     contentScore = contentScoreDetail.score;
     setContentScoreDetailed(contentScoreDetail); // Lưu chi tiết keyword matching
+    console.log("📝 Content score details:", {
+      content,
+      totalPoints: contentScoreDetail.totalPoints,
+      score: contentScoreDetail.score,
+      strongMatches: contentScoreDetail.strongMatches,
+      normalMatches: contentScoreDetail.normalMatches,
+    });
 
     // Tính time score (nếu có EXIF DateTime)
     if (exifData && exifData.dateTime) {
       timeScore = calculateTimeScore(exifData.dateTime, new Date());
+      console.log("🕐 Time score calculated:", timeScore);
     }
 
-    // Tính overall confidence
-    const result = calculateConfidence(locationScore, contentScore, timeScore);
+    // Tính YOLO score từ AI validation (nếu có)
+    let yoloScore = null;
+    if (yoloResult && yoloResult.success) {
+      yoloScore = calculateYoloScore(yoloResult.damage_percentage, yoloResult.num_potholes);
+      console.log("🤖 YOLO score calculated:", yoloScore);
+    } else if (yoloResult && !yoloResult.success) {
+      console.log("⚠️ YOLO validation failed, skipping YOLO score");
+    } else {
+      console.log("ℹ️ YOLO not used");
+    }
+
+    // Tính overall confidence (với YOLO score nếu có)
+    const result = calculateConfidence(locationScore, contentScore, timeScore, yoloScore);
     setConfidenceResult(result);
 
     // Tạo FormData để gửi lên server (nếu cần)
@@ -162,8 +247,12 @@ const App = () => {
       formData.append("image", imageFile);
     }
     formData.append("location", location);
+    formData.append("reportCoords", reportCoords ? JSON.stringify(reportCoords) : null);
     formData.append("content", content);
     formData.append("confidence", result);
+    if (yoloResult) {
+      formData.append("yoloResult", JSON.stringify(yoloResult));
+    }
 
     // Hiển thị thông tin chi tiết
     const breakdown = result.breakdown;
@@ -179,13 +268,18 @@ const App = () => {
     if (breakdown.time !== undefined) {
       detailMsg += `  • Thời gian: ${breakdown.time}/100\n`;
     }
+    if (breakdown.yolo !== undefined) {
+      detailMsg += `  • AI Pothole: ${breakdown.yolo}/100\n`;
+    }
 
     alert(detailMsg);
 
     console.log("Dữ liệu form với confidence:", {
       image: imageFile ? imageFile.name : "ảnh từ camera",
       location,
+      reportCoords,
       content,
+      yoloResult,
       confidence: result,
     });
 
@@ -199,17 +293,23 @@ const App = () => {
     setImageFile(null);
     setLocation("");
     setContent("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    if (cameraInputRef.current) cameraInputRef.current.value = "";
     setLocationStatus("");
     setExifData(null);
     setConfidenceResult(null);
     setContentScoreDetailed(null);
+    setYoloResult(null);
+    setYoloValidating(false);
   };
 
   // Callback khi EXIF được extracted từ Frontend
   const handleExifExtracted = (exifInfo) => {
     setExifData(exifInfo);
+  };
+
+  // Callback khi YOLO validation hoàn thành
+  const handleYoloResultUpdate = (result) => {
+    setYoloResult(result);
+    // Note: yoloValidating flag được quản lý trong Frontend component
   };
 
   return (
@@ -224,16 +324,19 @@ const App = () => {
           <div className="form-body">
             <Frontend
               imagePreview={imagePreview}
+              imageFile={imageFile}
               location={location}
               isGettingLocation={isGettingLocation}
               locationStatus={locationStatus}
               exifData={exifData}
+              yoloResult={yoloResult}
+              yoloValidating={yoloValidating}
               onFileSelect={handleFileSelect}
-              onCameraCapture={handleCameraCapture}
               onRemoveImage={handleRemoveImage}
               onLocationChange={setLocation}
               onGetLocation={getCurrentLocation}
               onExifExtracted={handleExifExtracted}
+              onYoloResultUpdate={handleYoloResultUpdate}
             />
 
             <Backend

@@ -4,26 +4,32 @@ import {
   extractGPSFromExif,
   extractDateTimeFromExif,
 } from "../../utils/scoring";
+import { validateImageWithYolo } from "../../utils/yoloValidator";
+import YoloResult from "./YoloResult";
 import "./Frontend.css";
 
 const Frontend = ({
   imagePreview,
+  imageFile,
   location,
   isGettingLocation,
   locationStatus,
   exifData,
+  yoloResult,
+  yoloValidating,
   onFileSelect,
-  onCameraCapture,
   onRemoveImage,
   onLocationChange,
   onGetLocation,
   onExifExtracted,
+  onYoloResultUpdate,
 }) => {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const isGettingLocationRef = useRef(false);
 
   // Xử lý khi chọn file từ máy tính
-  const handleFileSelectWithExif = (e) => {
+  const handleFileSelectWithExif = async (e) => {
     const file = e.target.files[0];
     if (file && file.type.startsWith("image/")) {
       // Đọc file để xử lý preview ảnh
@@ -58,26 +64,28 @@ const Frontend = ({
           // Extract DateTime
           const dateTime = extractDateTimeFromExif(exif);
 
-          if (gpsLocation || dateTime) {
-            console.log("✅ EXIF extracted:", { gpsLocation, dateTime });
-            onExifExtracted({
-              gpsLocation,
-              dateTime,
-              allExif: exif,
-            });
-          } else {
-            // Ảnh không có GPS hoặc DateTime
-            console.warn("⚠️ Ảnh không có EXIF metadata (GPS/DateTime)");
-            onExifExtracted(null);
-            alert("⚠️ Ảnh của bạn không chứa thông tin vị trí/thời gian (EXIF metadata).\n\nVui lòng nhập vị trí và thời gian thủ công phía dưới.");
-          }
+          console.log("✅ EXIF extracted:", { gpsLocation, dateTime });
+
+          // Gọi callback để lưu EXIF data vào App.jsx
+          onExifExtracted({
+            gpsLocation,
+            dateTime,
+            allExif: exif,
+          });
         } catch (error) {
           console.error("❌ Error reading EXIF:", error);
+          // Nếu không đọc được EXIF, vẫn tiếp tục xử lý ảnh
           onExifExtracted(null);
-          alert("⚠️ Không thể đọc metadata ảnh.\n\nVui lòng nhập vị trí và thời gian thủ công.");
         }
       };
       exifReader.readAsBinaryString(file);
+
+      // Validate với YOLO AI (async, không block EXIF extraction)
+      if (onYoloResultUpdate) {
+        console.log("🤖 Bắt đầu xác thực YOLO...");
+        const yoloRes = await validateImageWithYolo(file);
+        onYoloResultUpdate(yoloRes);
+      }
     } else if (file) {
       alert("Vui lòng chọn file ảnh hợp lệ (jpg, png, ...)");
     }
@@ -146,7 +154,7 @@ const Frontend = ({
             <button
               type="button"
               className="btn-outline"
-              onClick={onCameraCapture}
+              onClick={() => cameraInputRef.current?.click()}
             >
               📸 Chụp ảnh
             </button>
@@ -154,6 +162,14 @@ const Frontend = ({
           <p className="hint-text">
             Hỗ trợ JPG, PNG. Chụp ảnh trực tiếp từ camera thiết bị.
           </p>
+          
+          {/* YOLO Validation Result */}
+          <YoloResult
+            yoloResult={yoloResult}
+            imageFile={imageFile}
+            onResultUpdate={onYoloResultUpdate}
+            isValidating={yoloValidating}
+          />
         </div>
       </div>
 
@@ -177,7 +193,17 @@ const Frontend = ({
             <button
               type="button"
               className="get-location-btn"
-              onClick={onGetLocation}
+              onClick={() => {
+                // Debounce: tránh gọi geolocation nhiều lần
+                if (!isGettingLocationRef.current && !isGettingLocation) {
+                  isGettingLocationRef.current = true;
+                  onGetLocation();
+                  // Reset flag sau 12s (timeout của geolocation + buffer)
+                  setTimeout(() => {
+                    isGettingLocationRef.current = false;
+                  }, 12000);
+                }
+              }}
               disabled={isGettingLocation}
             >
               <span>🎯</span>
@@ -186,11 +212,35 @@ const Frontend = ({
           </div>
           {locationStatus && (
             <div
-              className={`loc-status ${locationStatus.includes("✓") ? "success" : "error"}`}
+              className={`loc-status ${
+                locationStatus.includes("✓") ||
+                locationStatus.includes("✅")
+                  ? "success"
+                  : "error"
+              }`}
             >
               {locationStatus}
             </div>
           )}
+          {locationStatus &&
+            (locationStatus.includes("🔒") ||
+              locationStatus.includes("từ chối")) && (
+              <div className="location-help">
+                <p>💡 Cách bật quyền vị trí:</p>
+                <ul>
+                  <li>🔒 Nhấn vào biểu tượng khóa bên cạnh URL</li>
+                  <li>📍 Tìm mục "Location" và chọn "Allow"</li>
+                  <li>🔄 Tải lại trang và thử lại</li>
+                </ul>
+                <button
+                  type="button"
+                  className="retry-btn"
+                  onClick={onGetLocation}
+                >
+                  🔄 Thử lại sau khi đã bật quyền
+                </button>
+              </div>
+            )}
         </div>
       </div>
 

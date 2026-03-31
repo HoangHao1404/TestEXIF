@@ -17,7 +17,7 @@ Hệ thống tính độ tin cậy (confidence) của một báo cáo dựa trê
 ### Công thức
 
 ```
-score = max(0, 100 - (distance_km / 1) × 100)
+score = max(0, 100 - (distance_km / 5) × 100)
 ```
 
 ### Bảng điểm
@@ -25,11 +25,12 @@ score = max(0, 100 - (distance_km / 1) × 100)
 | Khoảng cách | Điểm |
 | ----------- | ---- |
 | 0 m         | 100  |
-| 100 m       | 90   |
-| 250 m       | 75   |
-| 500 m       | 50   |
-| 750 m       | 25   |
-| 1 km        | 0    |
+| 500 m       | 90   |
+| 1 km        | 80   |
+| 2 km        | 60   |
+| 3 km        | 40   |
+| 4 km        | 20   |
+| 5 km        | 0    |
 
 ### Quy tắc
 

@@ -137,6 +137,20 @@ const Backend = ({
                   </span>
                 </div>
               )}
+              {confidenceResult.breakdown.yolo !== undefined && (
+                <div className="breakdown-row">
+                  <span>🤖 AI Pothole</span>
+                  <div className="progress-bar">
+                    <div
+                      className="progress-fill"
+                      style={{ width: `${confidenceResult.breakdown.yolo}%` }}
+                    ></div>
+                  </div>
+                  <span className="score">
+                    {confidenceResult.breakdown.yolo}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
